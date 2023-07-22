@@ -1,0 +1,312 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# # Exploratory Data Analysis
+
+# In[16]:
+
+
+import numpy as np
+import pandas as pd 
+import statsmodels.api as sm
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import scale, StandardScaler
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.metrics import confusion_matrix, accuracy_score, mean_squared_error, r2_score, roc_auc_score, roc_curve, classification_report
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import KFold
+import warnings
+warnings.simplefilter(action = "ignore") 
+
+
+# In[17]:
+
+
+data = pd.read_csv("diabetes.csv")
+
+
+# In[18]:
+
+
+data.head()
+
+
+# In[19]:
+
+
+data.shape
+
+
+# In[20]:
+
+
+data.info()
+
+
+# In[21]:
+
+
+data["Outcome"].value_counts()*100/len(data)
+
+
+# In[22]:
+
+
+data.Outcome.value_counts()
+
+
+# In[23]:
+
+
+data["Age"].hist(edgecolor = "blue")
+
+
+# In[24]:
+
+
+print("Max Age: " + str(data["Age"].max()) + " Min Age: " + str(data["Age"].min()))
+
+
+# In[25]:
+
+
+fig, ax = plt.subplots(4,2, figsize=(16,16))
+sns.distplot(data.Age, bins = 20, ax=ax[0,0]) 
+sns.distplot(data.Pregnancies, bins = 20, ax=ax[0,1]) 
+sns.distplot(data.Glucose, bins = 20, ax=ax[1,0]) 
+sns.distplot(data.BloodPressure, bins = 20, ax=ax[1,1]) 
+sns.distplot(data.SkinThickness, bins = 20, ax=ax[2,0])
+sns.distplot(data.Insulin, bins = 20, ax=ax[2,1])
+sns.distplot(data.DiabetesPedigreeFunction, bins = 20, ax=ax[3,0]) 
+sns.distplot(data.BMI, bins = 20, ax=ax[3,1])
+
+
+# In[26]:
+
+
+data.groupby("Outcome").agg({"Pregnancies":"mean"})
+
+
+# In[27]:
+
+
+data.groupby("Outcome").agg({"Age":"mean"})
+
+
+# In[28]:
+
+
+data.groupby("Outcome").agg({"Age":"max"})
+
+
+# In[29]:
+
+
+data.groupby("Outcome").agg({"Insulin": "mean"})
+
+
+# In[30]:
+
+
+data.groupby("Outcome").agg({"Glucose": "mean"})
+
+
+# In[31]:
+
+
+data.groupby("Outcome").agg({"BMI": "mean"})
+
+
+# In[32]:
+
+
+f, ax = plt.subplots(1, 2, figsize=(18, 8))
+data['Outcome'].value_counts().plot.pie(explode=[0, 0.1], autopct='%1.1f%%', ax=ax[0], shadow=True)
+ax[0].set_title('Target')
+ax[0].set_ylabel('')
+
+sns.countplot(data=data, x='Outcome', ax=ax[1])
+ax[1].set_title('Outcome')
+
+plt.show()
+
+
+# In[33]:
+
+
+data.corr()
+
+
+# In[34]:
+
+
+f, ax = plt.subplots(figsize= [20,15])
+sns.heatmap(data.corr(), annot=True, fmt=".2f", ax=ax, cmap = "magma" )
+ax.set_title("Correlation Matrix", fontsize=20)
+plt.show()
+
+
+# # Data Preprocessing
+
+# In[35]:
+
+
+data[['Glucose','BloodPressure','SkinThickness','Insulin','BMI']] = data[['Glucose','BloodPressure','SkinThickness','Insulin','BMI']].replace(0,np.NaN)
+
+
+# In[36]:
+
+
+pip install Missingno
+
+
+# In[37]:
+
+
+import missingno as msno
+msno.bar(data);
+
+
+# In[38]:
+
+
+def median_target(var):   
+    temp = data[data[var].notnull()]
+    temp = temp[[var, 'Outcome']].groupby(['Outcome'])[[var]].median().reset_index()
+    return temp
+
+
+# In[39]:
+
+
+columns = data.columns
+columns = columns.drop("Outcome")
+for i in columns:
+    median_target(i)
+    data.loc[(data['Outcome'] == 0 ) & (data[i].isnull()), i] = median_target(i)[i][0]
+    data.loc[(data['Outcome'] == 1 ) & (data[i].isnull()), i] = median_target(i)[i][1]
+
+
+# In[40]:
+
+
+data.isnull().sum()
+
+
+# # Outlier Observation Analysis
+
+# In[41]:
+
+
+for feature in data:
+    
+    Q1 = data[feature].quantile(0.25)
+    Q3 = data[feature].quantile(0.75)
+    IQR = Q3-Q1
+    lower = Q1- 1.5*IQR
+    upper = Q3 + 1.5*IQR
+    
+    if data[(data[feature] > upper)].any(axis=None):
+        print(feature,"yes")
+    else:
+        print(feature, "no")
+
+
+# In[42]:
+
+
+import seaborn as sns
+sns.boxplot(x = data["Insulin"]);
+
+
+# In[95]:
+
+
+Q1 = data.Insulin.quantile(0.25)
+Q3 = data.Insulin.quantile(0.75)
+IQR = Q3-Q1
+lower = Q1 - 1.5*IQR
+upper = Q3 + 1.5*IQR
+data.loc[data["Insulin"] > upper,"Insulin"] = upper
+
+
+# In[97]:
+
+
+import seaborn as sns
+sns.boxplot(x = data["Insulin"]);
+
+
+# # Random Forests Tuning
+
+# In[98]:
+
+
+rf_params = {"n_estimators" :[100,200,500,1000], 
+             "max_features": [3,5,7], 
+             "min_samples_split": [2,5,10,30],
+            "max_depth": [3,5,8,None]}
+
+
+# In[99]:
+
+
+rf_model = RandomForestClassifier(random_state = 12345)
+
+
+# In[103]:
+
+
+X = np.array([[0, 0], [1, 1]])
+y = np.array([0, 1])
+
+
+# In[104]:
+
+
+from sklearn.model_selection import GridSearchCV, LeaveOneOut
+
+gs_cv = GridSearchCV(rf_model,
+                     rf_params,
+                     cv=LeaveOneOut(),
+                     n_jobs=-1,
+                     verbose=2)
+gs_cv.fit(X,y)
+
+
+# In[106]:
+
+
+gs_cv.best_params_
+
+
+# In[107]:
+
+
+rf_tuned = RandomForestClassifier(**gs_cv.best_params_)
+
+
+# In[108]:
+
+
+rf_tuned = rf_tuned.fit(X,y)
+
+
+# In[109]:
+
+
+cross_val_score(rf_tuned, X, y, cv = LeaveOneOut()).mean()
+
+
+# In[ ]:
+
+
+
+
